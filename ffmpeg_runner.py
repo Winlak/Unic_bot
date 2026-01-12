@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import subprocess
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import config
+from banner_utils import BannerDecision, build_banner_filter, choose_banner_placement
+from media_probe import detect_audio_stream, probe_video_info
 from video_params import VariantParams
 
 
@@ -13,34 +16,15 @@ class FFmpegProcessError(RuntimeError):
     pass
 
 
-def _input_has_audio(path: Path) -> bool:
-    cmd = [
-        config.FFPROBE_BINARY,
-        "-v",
-        "error",
-        "-select_streams",
-        "a:0",
-        "-show_entries",
-        "stream=sample_rate",
-        "-of",
-        "default=noprint_wrappers=1:nokey=1",
-        str(path),
-    ]
-    try:
-        result = subprocess.run(
-            cmd,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except FileNotFoundError:
-        return True
-    except subprocess.CalledProcessError:
-        return False
-    return bool(result.stdout.strip())
+logger = logging.getLogger(__name__)
 
 
-def build_ffmpeg_command(input_path: Path, output_path: Path, params: VariantParams) -> List[str]:
+def build_ffmpeg_command(
+    input_path: Path,
+    output_path: Path,
+    params: VariantParams,
+    banner_decision: Optional[BannerDecision] = None,
+) -> List[str]:
     zoom = params.zoom
     video_filters = [
         f"scale=iw*{zoom:.5f}:ih*{zoom:.5f}:flags=lanczos",
@@ -50,9 +34,9 @@ def build_ffmpeg_command(input_path: Path, output_path: Path, params: VariantPar
         "setpts=PTS-STARTPTS",
         f"noise=alls={params.noise_level}:allf=t",
     ]
-    video_filter_chain = ",".join(video_filters)
+    base_chain = ",".join(video_filters)
 
-    has_audio = _input_has_audio(input_path)
+    has_audio = detect_audio_stream(input_path)
     audio_args: List[str]
     if has_audio:
         base_sr = config.AUDIO_BASE_SAMPLE_RATE
@@ -78,7 +62,10 @@ def build_ffmpeg_command(input_path: Path, output_path: Path, params: VariantPar
     else:
         audio_args = ["-an"]
 
-    command = [
+    info = probe_video_info(input_path)
+    banner_decision = banner_decision or choose_banner_placement(input_path, info)
+
+    input_args = [
         config.FFMPEG_BINARY,
         "-hide_banner",
         "-loglevel",
@@ -86,8 +73,30 @@ def build_ffmpeg_command(input_path: Path, output_path: Path, params: VariantPar
         "-y",
         "-i",
         str(input_path),
-        "-vf",
-        video_filter_chain,
+    ]
+
+    filter_complex = None
+    map_args: List[str] = ["-map", "[vout]"]
+
+    if banner_decision.spec:
+        if banner_decision.spec.is_video:
+            input_args.extend(["-stream_loop", "-1", "-i", str(banner_decision.spec.path)])
+        else:
+            input_args.extend(["-loop", "1", "-i", str(banner_decision.spec.path)])
+        banner_filter, output_label = build_banner_filter(banner_decision.spec)
+        filter_complex = ";".join([
+            f"[0:v]{base_chain}[base]",
+            banner_filter,
+        ])
+        map_args = ["-map", f"[{output_label}]"]
+    else:
+        filter_complex = f"[0:v]{base_chain}[vout]"
+
+    command = input_args
+    if filter_complex:
+        command.extend(["-filter_complex", filter_complex])
+    command.extend(map_args)
+    command.extend([
         "-c:v",
         config.VIDEO_CODEC,
         "-preset",
@@ -98,8 +107,11 @@ def build_ffmpeg_command(input_path: Path, output_path: Path, params: VariantPar
         "high",
         "-pix_fmt",
         "yuv420p",
-    ]
+    ])
+
     command.extend(audio_args)
+    if has_audio:
+        command.extend(["-map", "0:a?"])
     command.append("-shortest")
     command.extend([
         "-movflags",
@@ -119,4 +131,5 @@ async def run_ffmpeg(command: List[str]) -> None:
     )
     stdout, stderr = await process.communicate()
     if process.returncode != 0:
+        logger.error("FFmpeg failed: %s", " ".join(command))
         raise FFmpegProcessError(stderr.decode().strip() or "FFmpeg exited with error")
