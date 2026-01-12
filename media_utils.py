@@ -35,6 +35,20 @@ def probe_duration_seconds(path: Path) -> float:
             text=True,
         )
     except (FileNotFoundError, subprocess.CalledProcessError):
+        cmd = [config.FFMPEG_BINARY, "-hide_banner", "-i", str(path)]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True)
+        except FileNotFoundError:
+            return 0.0
+        stderr = result.stderr or ""
+        for line in stderr.splitlines():
+            if "Duration:" in line:
+                try:
+                    parts = line.split("Duration:")[1].split(",")[0].strip().split(":")
+                    duration = float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
+                    return max(duration, 0.0)
+                except (IndexError, ValueError):
+                    return 0.0
         return 0.0
     try:
         duration = float(result.stdout.strip())

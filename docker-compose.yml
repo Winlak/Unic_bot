@@ -3,5 +3,7 @@ services:
     build: .
     container_name: unicbot
     restart: unless-stopped
+    env_file:
+      - .env
     volumes:
       - ./tmp:/app/tmp

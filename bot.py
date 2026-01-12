@@ -27,7 +27,9 @@ from aiogram.types import (
 )
 
 import config
+from banner_utils import choose_banner_placement
 from ffmpeg_runner import FFmpegProcessError, build_ffmpeg_command, run_ffmpeg
+from media_probe import probe_video_info
 from media_utils import get_file_size_bytes, transcode_to_size_limit
 from video_params import generate_variant_params
 from youtube_downloader import (
@@ -242,19 +244,34 @@ async def process_video(bot: Bot, user_id: int, chat_id: int) -> None:
         input_path = state.input_path
         variants = state.variants
     try:
+        info = probe_video_info(input_path)
+        try:
+            banner_decision = choose_banner_placement(input_path, info)
+        except FileNotFoundError as exc:
+            await bot.send_message(chat_id, f"Ошибка баннера: {exc}")
+            return
+        except Exception as exc:
+            await bot.send_message(chat_id, f"Ошибка анализа баннера: {exc}")
+            banner_decision = None
         for index in range(1, variants + 1):
             seed = random.randint(1, 10_000_000)
             params = generate_variant_params(seed)
             output_path = config.TMP_DIR / f"output_{uuid.uuid4().hex}_{index}.mp4"
-            command = build_ffmpeg_command(input_path, output_path, params)
+            command = build_ffmpeg_command(input_path, output_path, params, banner_decision)
             try:
                 await run_ffmpeg(command)
             except FFmpegProcessError as exc:
                 await bot.send_message(chat_id, f"Ошибка FFmpeg (вариант {index}): {exc}")
                 await cleanup_path(output_path)
                 return
+            if banner_decision and banner_decision.spec:
+                banner_status = f"banner: {banner_decision.spec.position}/{banner_decision.spec.mode}"
+            elif banner_decision:
+                banner_status = f"banner: {banner_decision.reason}"
+            else:
+                banner_status = "banner: error"
             caption = (
-                f"Вариант {index}/{variants}\n" f"{params.as_report()}"
+                f"Вариант {index}/{variants}\n" f"{params.as_report()}\n{banner_status}"
             )
             await send_video_with_retry(bot, chat_id, output_path, caption)
             await cleanup_path(output_path)
@@ -318,7 +335,7 @@ async def send_video_with_retry(bot: Bot, chat_id: int, file_path: Path, caption
 
 async def main() -> None:
     if not config.BOT_TOKEN or config.OWNER_TELEGRAM_ID == 0:
-        raise RuntimeError("Заполни BOT_TOKEN и OWNER_TELEGRAM_ID в config.py")
+        raise RuntimeError("Заполни BOT_TOKEN и OWNER_TELEGRAM_ID в .env или через переменные окружения")
     bot = Bot(
         token=config.BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
