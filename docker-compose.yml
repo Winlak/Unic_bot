@@ -1,0 +1,7 @@
+services:
+  bot:
+    build: .
+    container_name: unicbot
+    restart: unless-stopped
+    volumes:
+      - ./tmp:/app/tmp
