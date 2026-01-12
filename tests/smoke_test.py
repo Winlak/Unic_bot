@@ -60,6 +60,7 @@ def create_banner(path: Path) -> None:
     _run(cmd)
 
 
+
 def _filter_complex_from_command(command: list[str]) -> str:
     if "-filter_complex" not in command:
         return ""
@@ -75,12 +76,14 @@ def _assert_safe_fit(command: list[str]) -> None:
     assert "max(2" in filter_complex
 
 
+
 def run_pipeline(input_path: Path, output_path: Path) -> str:
     info = probe_video_info(input_path)
     decision = choose_banner_placement(input_path, info)
     params = generate_variant_params(123)
     command = build_ffmpeg_command(input_path, output_path, params, decision)
     _assert_safe_fit(command)
+
     _run(command)
     return decision.spec.position if decision.spec else "none"
 

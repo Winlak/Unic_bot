@@ -200,6 +200,7 @@ def choose_banner_placement(input_path: Path, info: VideoInfo) -> BannerDecision
             else:
                 chosen_mode = "overlay"
 
+
     min_dim = max(1, min(info.width, info.height))
     strip_height = max(2, int(info.height * config.BANNER_STRIP_RATIO))
     margin_px = max(2, int(min_dim * config.BANNER_MARGIN_RATIO))
@@ -210,6 +211,7 @@ def choose_banner_placement(input_path: Path, info: VideoInfo) -> BannerDecision
             strip_height = min(info.height, max(strip_height, 2 * margin_px + 2))
         else:
             strip_height = max(strip_height, 2 * margin_px + 2)
+
     chromakey_color = config.CHROMAKEY_COLOR or _median_corner_color(path)
     spec = BannerSpec(
         path=path,
@@ -237,7 +239,9 @@ def build_banner_filter(spec: BannerSpec, base_label: str = "base") -> tuple[str
         )
 
     banner_chain = ",".join(banner_filters)
+
     max_w_expr = f"max(2\\,{spec.width_ratio:.3f}*ref_w-2*{margin})"
+
 
     if spec.mode == "strip":
         strip_h = spec.strip_height
@@ -247,6 +251,7 @@ def build_banner_filter(spec: BannerSpec, base_label: str = "base") -> tuple[str
             y_target = f"H-{strip_h}+(" + f"({strip_h}-h)/2)"
         y_banner = f"max({margin}\\,min({y_target}\\,H-h-{margin}))"
         max_h_expr = f"max(2\\,{strip_h}-2*{margin})"
+
         filters = [
             f"[{base_label}]scale=iw:ih*(1-{config.BANNER_STRIP_RATIO:.3f})[scaled]",
         ]
@@ -265,6 +270,7 @@ def build_banner_filter(spec: BannerSpec, base_label: str = "base") -> tuple[str
         x_expr = f"max({margin}\\,min((W-w)/2\\,W-w-{margin}))"
         filters.append(
             f"[base2][banner]overlay=x={x_expr}:y={y_banner}:format=auto[vout]"
+
         )
         return ";".join(filters), "vout"
 
@@ -280,7 +286,9 @@ def build_banner_filter(spec: BannerSpec, base_label: str = "base") -> tuple[str
     filters = [
         f"[{base_label}]null[canvas]",
         f"[1:v]{banner_chain}[banner_raw]",
+
         f"[banner_raw][canvas]scale2ref=w={max_w_expr}:h={max_h_expr}:force_original_aspect_ratio=decrease[banner][base2]",
         f"[base2][banner]overlay=x={x_expr}:y={y_expr}:format=auto[vout]",
+
     ]
     return ";".join(filters), "vout"
