@@ -200,8 +200,18 @@ def choose_banner_placement(input_path: Path, info: VideoInfo) -> BannerDecision
             else:
                 chosen_mode = "overlay"
 
-    strip_height = max(1, int(info.height * config.BANNER_STRIP_RATIO))
-    margin_px = max(2, int(min(info.width, info.height) * config.BANNER_MARGIN_RATIO))
+
+    min_dim = max(1, min(info.width, info.height))
+    strip_height = max(2, int(info.height * config.BANNER_STRIP_RATIO))
+    margin_px = max(2, int(min_dim * config.BANNER_MARGIN_RATIO))
+    max_margin = max(2, int(min_dim * 0.08))
+    margin_px = min(margin_px, max_margin)
+    if strip_height <= 2 * margin_px + 2:
+        if info.height > 0:
+            strip_height = min(info.height, max(strip_height, 2 * margin_px + 2))
+        else:
+            strip_height = max(strip_height, 2 * margin_px + 2)
+
     chromakey_color = config.CHROMAKEY_COLOR or _median_corner_color(path)
     spec = BannerSpec(
         path=path,
@@ -230,12 +240,18 @@ def build_banner_filter(spec: BannerSpec, base_label: str = "base") -> tuple[str
 
     banner_chain = ",".join(banner_filters)
 
+    max_w_expr = f"max(2\\,{spec.width_ratio:.3f}*ref_w-2*{margin})"
+
+
     if spec.mode == "strip":
         strip_h = spec.strip_height
         if spec.position == "top":
-            y_banner = f"({strip_h}-h)/2"
+            y_target = f"({strip_h}-h)/2"
         else:
-            y_banner = f"H-{strip_h}+(" + f"({strip_h}-h)/2)"
+            y_target = f"H-{strip_h}+(" + f"({strip_h}-h)/2)"
+        y_banner = f"max({margin}\\,min({y_target}\\,H-h-{margin}))"
+        max_h_expr = f"max(2\\,{strip_h}-2*{margin})"
+
         filters = [
             f"[{base_label}]scale=iw:ih*(1-{config.BANNER_STRIP_RATIO:.3f})[scaled]",
         ]
@@ -249,22 +265,30 @@ def build_banner_filter(spec: BannerSpec, base_label: str = "base") -> tuple[str
             )
         filters.append(f"[1:v]{banner_chain}[banner_raw]")
         filters.append(
-            f"[banner_raw][canvas]scale2ref=w=min(iw\\,{spec.width_ratio:.3f}*ref_w):h=-1[banner][base2]"
+            f"[banner_raw][canvas]scale2ref=w={max_w_expr}:h={max_h_expr}:force_original_aspect_ratio=decrease[banner][base2]"
         )
+        x_expr = f"max({margin}\\,min((W-w)/2\\,W-w-{margin}))"
         filters.append(
-            f"[base2][banner]overlay=x=(W-w)/2:y={y_banner}:format=auto[vout]"
+            f"[base2][banner]overlay=x={x_expr}:y={y_banner}:format=auto[vout]"
+
         )
         return ";".join(filters), "vout"
 
     if spec.position == "top":
-        y_expr = f"{margin}"
+        y_expr = f"max({margin}\\,min({margin}\\,H-h-{margin}))"
     else:
-        y_expr = f"H-h-{margin}"
+        y_expr = f"max({margin}\\,min(H-h-{margin}\\,H-h-{margin}))"
+
+    band_height_expr = f"max(2\\,{config.BANNER_STRIP_RATIO:.3f}*ref_h)"
+    max_h_expr = f"max(2\\,{band_height_expr}-2*{margin})"
+    x_expr = f"max({margin}\\,min((W-w)/2\\,W-w-{margin}))"
 
     filters = [
         f"[{base_label}]null[canvas]",
         f"[1:v]{banner_chain}[banner_raw]",
-        f"[banner_raw][canvas]scale2ref=w=min(iw\\,{spec.width_ratio:.3f}*ref_w):h=-1[banner][base2]",
-        f"[base2][banner]overlay=x=(W-w)/2:y={y_expr}:format=auto[vout]",
+
+        f"[banner_raw][canvas]scale2ref=w={max_w_expr}:h={max_h_expr}:force_original_aspect_ratio=decrease[banner][base2]",
+        f"[base2][banner]overlay=x={x_expr}:y={y_expr}:format=auto[vout]",
+
     ]
     return ";".join(filters), "vout"

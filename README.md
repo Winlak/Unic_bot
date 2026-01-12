@@ -46,6 +46,10 @@ UNIC_BANNER_PATH=/absolute/path/to/banner.mp4
 - `UNIC_CHROMAKEY_COLOR=0x2ca0fc` (если пусто — определяется автоматически по углам)
 - `UNIC_FAIL_ON_MISSING_BANNER=false` (если true — ошибка при отсутствии баннера)
 
+#### Banner safe-fit (no clipping)
+Баннер всегда вписывается в доступную зону по максимальным `max_w/max_h` и координаты overlay «clamped», чтобы исключить обрезание по краям кадра даже при больших размерах и нестандартных пропорциях. Влияют параметры `UNIC_BANNER_WIDTH_RATIO`, `UNIC_BANNER_MARGIN_RATIO`, `UNIC_BANNER_STRIP_RATIO`.
+
+
 ## Запуск
 ```bash
 python bot.py
